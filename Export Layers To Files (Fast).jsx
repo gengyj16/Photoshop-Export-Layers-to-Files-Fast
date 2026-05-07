@@ -94,6 +94,24 @@ var TrimPrefType = {
     }
 };
 
+var TrimDirType = {
+    BOTH: 1,
+    HORIZONTAL: 2,
+    VERTICAL: 3,
+
+    values: function() {
+        return [this.BOTH, this.HORIZONTAL, this.VERTICAL];
+    },
+
+    forIndex: function(index) {
+        return this.values()[index];
+    },
+
+    getIndex: function(value) {
+        return indexOf(this.values(), value);
+    }
+};
+
 var ExportLayerTarget = {
     ALL_LAYERS: 1,
     SELECTED_LAYERS: 2, // Export selection, leave the rest as is, visibility for parent groups will be forced.
@@ -383,7 +401,8 @@ var DEFAULT_SETTINGS = {
     outputSuffix: app.stringIDToTypeID("outputSuffix"),
     overwrite: app.stringIDToTypeID("overwrite"),
     padding: app.stringIDToTypeID("padding"),
-    paddingValue: app.stringIDToTypeID("paddingValue"),
+    paddingXValue: app.stringIDToTypeID("paddingXValue"),
+    paddingYValue: app.stringIDToTypeID("paddingYValue"),
     png8ColorReduction: app.stringIDToTypeID("png8ColorReduction"),
     png8NumberOfColors: app.stringIDToTypeID("png8NumberOfColors"),
     png8DitherType: app.stringIDToTypeID("png8DitherType"),
@@ -406,6 +425,7 @@ var DEFAULT_SETTINGS = {
     topGroupAsLayer: app.stringIDToTypeID("topGroupAsLayer"),
     trim: app.stringIDToTypeID("trim"),
     trimValue: app.stringIDToTypeID("trimValue"),
+    trimDirValue: app.stringIDToTypeID("trimDirValue"),
     useDelimiter: app.stringIDToTypeID("useDelimiter"),
     visibleOnly: app.stringIDToTypeID('visibleOnly'),
 };
@@ -461,7 +481,7 @@ function main() {
     selectedLayerCount = layerCountResult.selectedLayerCount;
     var countDuration = profiler.getDuration(true, true);
     if (env.profiling) {
-        alert("Layers counted in " + profiler.format(countDuration), "Debug info");
+        alert("图层统计耗时 " + profiler.format(countDuration), "调试信息");
     }
 
     // show dialog
@@ -479,7 +499,7 @@ function main() {
         }
         var collected = collectLayers(progressBarWindow);
         if (userCancelled) {
-            alert("Export cancelled! No files saved.", "Finished", false);
+            alert("已取消导出!未保存任何文件。", "已完成", false);
             return "cancel";
         }
         layers = collected.layers;
@@ -488,7 +508,7 @@ function main() {
         groups = collected.groups;
         var collectionDuration = profiler.getDuration(true, true);
         if (env.profiling) {
-            alert("Layers collected in " + profiler.format(collectionDuration), "Debug info");
+            alert("图层收集耗时 " + profiler.format(collectionDuration), "调试信息");
         }
 
         // create unique folders
@@ -497,7 +517,7 @@ function main() {
         if (prefs.groupsAsFolders) {
             foldersOk = createUniqueFolders(prefs.exportLayerTarget);
             if (foldersOk !== true) {
-                alert(foldersOk + " Not exporting layers.", "Failed", true);
+                alert(foldersOk + " 未导出图层。", "失败", true);
             }
         }
 
@@ -510,17 +530,17 @@ function main() {
 
             var message = "";
             if (userCancelled) {
-                message += "Export cancelled!\n\n";
+                message += "已取消导出!\n\n";
             }
-            message += "Saved " + count.count + " files.";
+            message += "已保存 " + count.count + " 个文件。";
             if (env.profiling) {
-                message += "\n\nExport function took " + profiler.format(collectionDuration) + " + " + profiler.format(exportDuration) + " to perform.";
+                message += "\n\n导出过程耗时 " + profiler.format(collectionDuration) + " + " + profiler.format(exportDuration) + "。";
             }
             if (count.error) {
-                message += "\n\nSome layers failed to export! (Are there many layers with the same name?)";
+                message += "\n\n部分图层导出失败!(是否存在大量同名图层?)";
             }
             if(!prefs.silent && !BATCH_OPERATION) {
-                alert(message, "Finished", count.error);
+                alert(message, "已完成", count.error);
             }
         }
 
@@ -594,7 +614,7 @@ function exportLayers(exportLayerTarget, progressBarWindow) {
             var UPDATE_NUM = 20;
             if (progressBarWindow) {
                 var stepCount = (exportLayerTarget == ExportLayerTarget.ALL_LAYERS) ? count / UPDATE_NUM + 1 : 1;
-                showProgressBar(progressBarWindow, "Trimming...", stepCount);
+                showProgressBar(progressBarWindow, "正在裁切...", stepCount);
             }
 
             if (exportLayerTarget == ExportLayerTarget.ALL_LAYERS) {
@@ -612,12 +632,12 @@ function exportLayers(exportLayerTarget, progressBarWindow) {
                     }
                 }
             }
-
-            doc.trim(TrimType.TRANSPARENT);
+                
+            trimImage();
         }
 
         if (progressBarWindow) {
-            showProgressBar(progressBarWindow, "Exporting 1 of " + count + "...", count);
+            showProgressBar(progressBarWindow, "正在导出 1 / " + count + "...", count);
         }
 
         // Turn off all layers when exporting all layers - even seemingly invisible ones.
@@ -681,13 +701,13 @@ function exportLayers(exportLayerTarget, progressBarWindow) {
 
                     if (prefs.trimValue == TrimPrefType.INDIVIDUAL) {
                         try {
-                            doc.crop(layer.bounds);
+                            cropImage(layer.bounds);
                         } catch (e) {
                             useTrim = true;
                         }
                     }
                     if (prefs.trimValue == TrimPrefType.INDIVIDUAL_USE_TRIM) {
-                        doc.trim(TrimType.TRANSPARENT);
+                        trimImage();
                     }
 
                     var folderSafe = true;
@@ -720,7 +740,7 @@ function exportLayers(exportLayerTarget, progressBarWindow) {
             }
 
             if (progressBarWindow) {
-                updateProgressBar(progressBarWindow, "Exporting " + (i + 1) + " of " + count + "...");
+                updateProgressBar(progressBarWindow, "正在导出 " + (i + 1) + " / " + count + "...");
                 repaintProgressBar(progressBarWindow);
                 if (userCancelled) {
                     break;
@@ -736,6 +756,27 @@ function exportLayers(exportLayerTarget, progressBarWindow) {
     return retVal;
 }
 
+function cropImage(bounds) {
+    if (prefs.trimDirValue == TrimDirType.HORIZONTAL) {
+        var height = app.activeDocument.height.as("px");
+        app.activeDocument.crop([bounds[0], height]);
+    } else if (prefs.trimDirValue == TrimDirType.VERTICAL) {
+        var width = app.activeDocument.width.as("px");
+        app.activeDocument.trim([width, bounds[1]]);
+    } else {
+        app.activeDocument.crop(bounds);
+    }
+}
+
+function trimImage() {
+    if (prefs.trimDirValue == TrimDirType.HORIZONTAL) {
+        app.activeDocument.trim(TrimType.TRANSPARENT, false, true, false, true);
+    } else if (prefs.trimDirValue == TrimDirType.VERTICAL) {
+        app.activeDocument.trim(TrimType.TRANSPARENT, true, false, true, false);
+    } else {
+        app.activeDocument.trim(TrimType.TRANSPARENT);
+    }
+}
 
 function scaleImage() {
     var width = app.activeDocument.width.as("px") * (prefs.scaleValue / 100);
@@ -746,8 +787,8 @@ function addPadding() {
     oldH = app.activeDocument.height.as("px");
     oldW = app.activeDocument.width.as("px");
 
-    var width = (app.activeDocument.width.as("px")) + (prefs.paddingValue * 2);
-    var height = (app.activeDocument.height.as("px")) + (prefs.paddingValue * 2);
+    var width = (app.activeDocument.width.as("px")) + (prefs.paddingXValue * 2);
+    var height = (app.activeDocument.height.as("px")) + (prefs.paddingYValue * 2);
     var widthUnit = new UnitValue(width + " pixels");
     var heightUnit = new UnitValue(height + " pixels");
 
@@ -816,7 +857,7 @@ function createUniqueFolders(exportLayerTarget) {
                 }
 
                 if (!renamed) {
-                    return "Directory '" + folder.name + "' already exists. Failed to rename.";
+                    return "文件夹 '" + folder.name + "' 已存在。重命名失败。";
                 }
             }
 
@@ -826,7 +867,7 @@ function createUniqueFolders(exportLayerTarget) {
                     throw new Error();
                 }
             } catch (e) {
-                return "Failed to create directory '" + folder.name + "'.";
+                return "创建文件夹 '" + folder.name + "' 失败。";
             }
         }
     }
@@ -862,7 +903,7 @@ function saveImage(fileName) {
 function makeFolderName(group) {
     var folderName = makeValidFileName(group.layer.name, prefs.useDelimiter);
     if (folderName.length == 0) {
-        folderName = "Group";
+        folderName = "图层组";
     }
 
     folderName = prefs.destination + "/" + folderName;
@@ -903,7 +944,7 @@ function makeFileNameFromLayerName(layer, stripExt, withGroup, index) {
         }
     }
     if (fileName.length == 0) {
-        fileName = "Layer";
+        fileName = "图层";
     }
     return getUniqueFileName(fileName, layer, index);
 }
@@ -1122,7 +1163,7 @@ function createProgressBar() {
     try {
         win = new Window(rsrcString);
     } catch (e) {
-        alert("Progress bar resource is corrupt! Please, redownload the script with all files.", "Error", true);
+        alert("进度条资源已损坏!请重新下载脚本及其所有附带文件。", "错误", true);
         return false;
     }
 
@@ -1179,7 +1220,7 @@ function showDialog() {
     try {
         dialog = makeMainDialog();
     } catch (e) {
-        alert("Error opening dialog! Please, file an issue and try an older version.", "Error", true);
+        alert("打开对话框时出错!请提交问题反馈并尝试旧版本。", "错误", true);
         return false;
     }
 
@@ -1190,7 +1231,7 @@ function showDialog() {
     // ===================
     fields.txtDestination.text = prefs.destination;
     fields.btnBrowse.onClick = function() {
-        var newFilePath = Folder.selectDialog("Select destination folder", prefs.destination);
+        var newFilePath = Folder.selectDialog("选择目标文件夹", prefs.destination);
         if (newFilePath) {
             fields.txtDestination.text = newFilePath.fsName;
         }
@@ -1329,27 +1370,47 @@ function showDialog() {
     fields.cbTrim.value = prefs.trim;
     fields.cbTrim.onClick = function() {
         fields.ddTrim.enabled = this.value;
+        fields.ddTrimDir.enabled = this.value;
     };
 
     fields.ddTrim.enabled = prefs.trim;
     fields.ddTrim.selection = prefs.trimValue === TrimPrefType.DONT_TRIM ? 0 : TrimPrefType.getIndex(prefs.trimValue);
 
+    // ============
+    // TRIM DIRECTION SECTION
+    // ============
+    fields.ddTrimDir.enabled = prefs.trim;
+    fields.ddTrimDir.selection = TrimDirType.getIndex(prefs.trimDirValue);
+
     // ===============
     // PADDING SECTION
     // ===============
     fields.cbPadding.value = prefs.padding;
-    fields.grpPaddingLabel.enabled = prefs.padding;
-    fields.txtPadding.text = prefs.paddingValue;
-    fields.txtPadding.onChange = function() {
-    var paddingNum = parseInt(this.text, 10);
-    if (isNaN(paddingNum)) {
-        paddingNum = prefs.paddingValue;
-    }
-    paddingNum = Math.max(paddingNum, 0);
-    this.text = paddingNum;
-    };
     fields.cbPadding.onClick = function() {
-        fields.grpPaddingLabel.enabled = this.value;
+        fields.grpPaddingXLabel.enabled = this.value;
+        fields.grpPaddingYLabel.enabled = this.value;
+    };
+
+    fields.grpPaddingXLabel.enabled = prefs.padding;
+    fields.txtPaddingX.text = prefs.paddingXValue;
+    fields.txtPaddingX.onChange = function() {
+    var paddingXNum = parseInt(this.text, 10);
+    if (isNaN(paddingXNum)) {
+        paddingXNum = prefs.paddingXValue;
+    }
+    paddingXNum = Math.max(paddingXNum, 0);
+    this.text = paddingXNum;
+    };
+
+    fields.grpPaddingYLabel.enabled = prefs.padding;
+    fields.txtPaddingY.text = prefs.paddingYValue;
+    fields.txtPaddingY.onChange = function() {
+    var paddingYNum = parseInt(this.text, 10);
+    if (isNaN(paddingYNum)) {
+        paddingYNum = prefs.paddingYValue;
+    }
+    paddingYNum = Math.max(paddingYNum, 0);
+    this.text = paddingYNum;
     };
 
     // =============
@@ -1361,7 +1422,7 @@ function showDialog() {
     fields.txtScale.onChange = function() {
     var scaleNum = parseInt(this.text, 10);
     if (isNaN(scaleNum)) {
-        scaleNum = prefs.paddingValue;
+        scaleNum = prefs.scale;
     }
     scaleNum = Math.max(scaleNum, 1);
     this.text = scaleNum;
@@ -1598,8 +1659,9 @@ function saveSettings(dialog) {
     desc.putBoolean(DEFAULT_SETTINGS.overwrite, fields.cbOverwriteFiles.value);
     desc.putBoolean(DEFAULT_SETTINGS.silent, fields.cbSilent.value);
     desc.putBoolean(DEFAULT_SETTINGS.padding, fields.cbPadding.value);
-    desc.putInteger(DEFAULT_SETTINGS.paddingValue, parseInt(fields.txtPadding.text));
-    
+    desc.putInteger(DEFAULT_SETTINGS.paddingXValue, parseInt(fields.txtPaddingX.text));
+    desc.putInteger(DEFAULT_SETTINGS.paddingYValue, parseInt(fields.txtPaddingY.text));
+
     desc.putInteger(DEFAULT_SETTINGS.png8ColorReduction, fields.ddPng8ColorReduction.selection.index);
     desc.putInteger(DEFAULT_SETTINGS.png8NumberOfColors, parseInt(fields.txtPng8NumberofColors.text));
     desc.putInteger(DEFAULT_SETTINGS.png8DitherType, fields.ddPng8Dither.selection.index);
@@ -1625,6 +1687,7 @@ function saveSettings(dialog) {
     desc.putBoolean(DEFAULT_SETTINGS.topGroupAsLayer, fields.cbTopGroupsAsLayers.value);
     desc.putBoolean(DEFAULT_SETTINGS.trim, fields.cbTrim.value);
     desc.putInteger(DEFAULT_SETTINGS.trimValue, fields.cbTrim.value ? TrimPrefType.forIndex(fields.ddTrim.selection.index) : TrimPrefType.DONT_TRIM);
+    desc.putInteger(DEFAULT_SETTINGS.trimDirValue, TrimDirType.forIndex(fields.ddTrimDir.selection.index));
     desc.putBoolean(DEFAULT_SETTINGS.useDelimiter, fields.cbDelimiter.value);
     desc.putBoolean(DEFAULT_SETTINGS.visibleOnly, fields.cbVisibleOnly.value);
 
@@ -1671,7 +1734,8 @@ function getDefaultSettings() {
             outputSuffix:"",
             overwrite: false,
             padding: false,
-            paddingValue: 0,
+            paddingXValue: 0,
+            paddingYValue: 0,
             pdfAlphaChannel: false,
             pdfColorConversion: false,
             pdfCompatibility: 0,
@@ -1710,6 +1774,7 @@ function getDefaultSettings() {
             topGroupAsLayer: false,
             trim: false,
             trimValue: TrimPrefType.INDIVIDUAL,
+            trimDirValue: TrimDirType.BOTH,
             useDelimiter: false,
             visibleOnly: false,
         };
@@ -1754,7 +1819,8 @@ function getSettings(formatOpts) {
             outputSuffix: desc.getString(DEFAULT_SETTINGS.outputSuffix),
             overwrite: desc.getBoolean(DEFAULT_SETTINGS.overwrite),
             padding: desc.getBoolean(DEFAULT_SETTINGS.padding),
-            paddingValue: desc.getInteger(DEFAULT_SETTINGS.paddingValue),
+            paddingXValue: desc.getInteger(DEFAULT_SETTINGS.paddingXValue),
+            paddingYValue: desc.getInteger(DEFAULT_SETTINGS.paddingYValue),
             pdfAlphaChannel: desc.getBoolean(DEFAULT_SETTINGS.pdfAlphaChannel),
             pdfColorConversion: desc.getBoolean(DEFAULT_SETTINGS.pdfColorConversion),
             pdfCompatibility: desc.getInteger(DEFAULT_SETTINGS.pdfCompatibility),
@@ -1793,6 +1859,7 @@ function getSettings(formatOpts) {
             topGroupAsLayer: desc.getBoolean(DEFAULT_SETTINGS.topGroupAsLayer),
             trim: desc.getBoolean(DEFAULT_SETTINGS.trim),
             trimValue: desc.getInteger(DEFAULT_SETTINGS.trimValue),
+            trimDirValue: desc.getInteger(DEFAULT_SETTINGS.trimDirValue),
             useDelimiter: desc.getBoolean(DEFAULT_SETTINGS.useDelimiter),
             visibleOnly: desc.getBoolean(DEFAULT_SETTINGS.visibleOnly),
 
@@ -1813,7 +1880,7 @@ function getSettings(formatOpts) {
 
 function bootstrap() {
     function showError(err) {
-        alert(err + ': on line ' + err.line, 'Script Error', true);
+        alert(err + ':位于第 ' + err.line + ' 行', '脚本错误', true);
     }
 
     // initialisation of class methods
@@ -1826,7 +1893,7 @@ function bootstrap() {
             throw new Error();
         }
     } catch (e) {
-        alert("No document is open! Nothing to export.", "Error", true);
+        alert("未打开任何文档!没有可导出的内容。", "错误", true);
         return "cancel";
     }
 
@@ -1838,7 +1905,7 @@ function bootstrap() {
         env.version = parseInt(app.version, 10);
 
         if (env.version < 9) {
-            alert("Photoshop versions before CS2 are not supported!", "Error", true);
+            alert("不支持 Photoshop CS2 之前的版本!", "错误", true);
             return "cancel";
         }
 
@@ -1862,7 +1929,7 @@ function bootstrap() {
         // run the script itself
         if (env.cs3OrHigher) {
             // suspend history for CS3 or higher
-            app.activeDocument.suspendHistory('Export Layers To Files', 'main()');
+            app.activeDocument.suspendHistory('导出图层为文件', 'main()');
         } else {
             main();
         }
@@ -1926,7 +1993,7 @@ function collectLayersAM(progressBarWindow) {
 
         if (progressBarWindow) {
             // The layer count is actually + 1 if there's a background present, but it should be no biggie.
-            showProgressBar(progressBarWindow, "Collecting layers... Might take up to several seconds.", (layerCount + FEW_LAYERS) / FEW_LAYERS);
+            showProgressBar(progressBarWindow, "正在收集图层... 可能需要几秒钟。", (layerCount + FEW_LAYERS) / FEW_LAYERS);
         }
 
         // Query current selection.
@@ -2088,7 +2155,7 @@ function countLayersAM(progressBarWindow) {
 
         if (progressBarWindow) {
             // The layer count is actually + 1 if there's a background present, but it should be no biggie.
-            showProgressBar(progressBarWindow, "Counting layers... Might take up to several seconds.", (layerCount + FEW_LAYERS) / FEW_LAYERS);
+            showProgressBar(progressBarWindow, "正在统计图层... 可能需要几秒钟。", (layerCount + FEW_LAYERS) / FEW_LAYERS);
         }
 
         try {
@@ -2230,7 +2297,7 @@ function exportPng8AM(fileName, options) {
             break;
 
         default:
-            throw new Error("Unknown color reduction algorithm. Cannot export PNG-8!");
+            throw new Error("未知的颜色缩减算法,无法导出 PNG-8!");
     }
     desc4.putEnumerated(id14, id15, id16);
     var id361 = app.charIDToTypeID("FBPl");
@@ -2283,7 +2350,7 @@ function exportPng8AM(fileName, options) {
             break;
 
         default:
-            throw new Error("Unknown dither type. Cannot export PNG-8!");
+            throw new Error("未知的仿色类型,无法导出 PNG-8!");
     }
     desc4.putEnumerated(id21, id22, id23);
     var id24 = app.charIDToTypeID("DthA");
@@ -2320,7 +2387,7 @@ function exportPng8AM(fileName, options) {
             break;
 
         default:
-            throw new Error("Unknown transparency dither algorithm. Cannot export PNG-8!");
+            throw new Error("未知的透明度仿色算法,无法导出 PNG-8!");
     }
     desc4.putEnumerated(id30, id31, id32);
     var id33 = app.charIDToTypeID("TDtA");
@@ -2409,7 +2476,7 @@ function indexOf(array, element) {
 function loadResource(file) {
     var rsrcString;
     if (!file.exists) {
-        alert("Resource file '" + file.name + "' for the export dialog is missing! Please, download the rest of the files that come with this script.", "Error", true);
+        alert("导出对话框的资源文件 '" + file.name + "' 缺失!请下载脚本附带的其余文件。", "错误", true);
         return false;
     }
     try {
@@ -2421,7 +2488,7 @@ function loadResource(file) {
             throw file.error;
         }
     } catch (error) {
-        alert("Failed to read the resource file '" + file.name + "'!\n\nReason: " + error + "\n\nPlease, check it's available for reading and redownload it in case it became corrupted.", "Error", true);
+        alert("读取资源文件 '" + file.name + "' 失败!\n\n原因:" + error + "\n\n请检查文件是否可读;若已损坏,请重新下载。", "错误", true);
         return false;
     }
 
@@ -2494,10 +2561,13 @@ function getDialogFields(dialog) {
 
         cbTrim: dialog.findElement("cbTrim"),
         ddTrim: dialog.findElement("ddTrim"),
+        ddTrimDir: dialog.findElement("ddTrimDir"),
 
         cbPadding: dialog.findElement("cbPadding"),
-        grpPaddingLabel: dialog.findElement("grpPaddingLabel"),
-        txtPadding: dialog.findElement("txtPadding"),
+        grpPaddingXLabel: dialog.findElement("grpPaddingXLabel"),
+        txtPaddingX: dialog.findElement("txtPaddingX"),
+        grpPaddingYLabel: dialog.findElement("grpPaddingYLabel"),
+        txtPaddingY: dialog.findElement("txtPaddingY"),
 
         cbScale: dialog.findElement("cbScale"),
         grpScaleLabel: dialog.findElement("grpScaleLabel"),
@@ -2572,7 +2642,7 @@ function makeMainDialog() {
     // DIALOG
     // ======
     var dialog = new Window("dialog", undefined, undefined, {closeButton: false, resizeable: true}); 
-    dialog.text = "Export Layers To Files v2.7.1"; 
+    dialog.text = "导出图层为文件 v2.7.1";
     dialog.orientation = "column"; 
     dialog.alignChildren = ["center","center"]; 
     dialog.spacing = 5; 
@@ -2598,7 +2668,7 @@ function makeMainDialog() {
     // PNLDESTINATION
     // ==============
     var pnlDestination = grpCol1.add("panel", undefined, undefined, {name: "pnlDestination"}); 
-    pnlDestination.text = "Output Destination"; 
+    pnlDestination.text = "输出目标";
     pnlDestination.orientation = "row"; 
     pnlDestination.alignChildren = ["left","center"]; 
     pnlDestination.spacing = 10; 
@@ -2606,17 +2676,17 @@ function makeMainDialog() {
     pnlDestination.alignment = ["left","center"]; 
 
     var txtDestination = pnlDestination.add('edittext {properties: {name: "txtDestination"}}'); 
-    txtDestination.helpTip = "Where to save the files"; 
+    txtDestination.helpTip = "文件保存位置";
     txtDestination.preferredSize.width = 200; 
 
     var btnBrowse = pnlDestination.add("button", undefined, undefined, {name: "btnBrowse"}); 
-    btnBrowse.text = "Browse..."; 
+    btnBrowse.text = "浏览...";
     btnBrowse.justify = "left"; 
 
     // PNLEXPORT
     // =========
     var pnlExport = grpCol1.add("panel", undefined, undefined, {name: "pnlExport"}); 
-    pnlExport.text = "Export"; 
+    pnlExport.text = "导出";
     pnlExport.orientation = "column"; 
     pnlExport.alignChildren = ["left","top"]; 
     pnlExport.spacing = 11; 
@@ -2632,13 +2702,13 @@ function makeMainDialog() {
     grpExport.margins = 0; 
 
     var radioAll = grpExport.add("radiobutton", undefined, undefined, {name: "radioAll"}); 
-    radioAll.helpTip = "Exports all layers"; 
-    radioAll.text = "All Layers"; 
+    radioAll.helpTip = "导出全部图层";
+    radioAll.text = "全部图层";
     radioAll.value = true; 
 
     var radioSelected = grpExport.add("radiobutton", undefined, undefined, {name: "radioSelected"}); 
-    radioSelected.helpTip = "Only exports selected group. Must select a group to be enabled."; 
-    radioSelected.text = "Selected Group"; 
+    radioSelected.helpTip = "仅导出选中的图层组。需选中一个图层组才可启用。";
+    radioSelected.text = "选中的图层组";
 
     // GRPIGNORE
     // =========
@@ -2649,8 +2719,8 @@ function makeMainDialog() {
     grpIgnore.margins = 0; 
 
     var cbVisibleOnly = grpIgnore.add("checkbox", undefined, undefined, {name: "cbVisibleOnly"}); 
-    cbVisibleOnly.helpTip = "Whether to export only visible layers"; 
-    cbVisibleOnly.text = "Visible Only"; 
+    cbVisibleOnly.helpTip = "是否仅导出可见图层";
+    cbVisibleOnly.text = "仅可见图层";
 
     // GRPIGNOREPREFIX
     // ===============
@@ -2661,25 +2731,25 @@ function makeMainDialog() {
     grpIgnorePrefix.margins = 0; 
 
     var cbIgnorePrefix = grpIgnorePrefix.add("checkbox", undefined, undefined, {name: "cbIgnorePrefix"}); 
-    cbIgnorePrefix.helpTip = "Ignore layers starting with"; 
-    cbIgnorePrefix.text = "Ignore Layers Starting With "; 
+    cbIgnorePrefix.helpTip = "忽略以指定前缀开头的图层";
+    cbIgnorePrefix.text = "忽略以此开头的图层 ";
 
     var txtIgnorePrefix = grpIgnorePrefix.add('edittext {properties: {name: "txtIgnorePrefix"}}'); 
-    txtIgnorePrefix.helpTip = "The prefix to match against"; 
+    txtIgnorePrefix.helpTip = "用于匹配的前缀";
     txtIgnorePrefix.text = "!"; 
     txtIgnorePrefix.preferredSize.width = 31; 
 
     // PNLNAMEFILES
     // ============
     var pnlNameFiles = grpCol1.add("panel", undefined, undefined, {name: "pnlNameFiles"}); 
-    pnlNameFiles.text = "Filenames"; 
+    pnlNameFiles.text = "文件名";
     pnlNameFiles.orientation = "column"; 
     pnlNameFiles.alignChildren = ["left","top"]; 
     pnlNameFiles.spacing = 4; 
     pnlNameFiles.margins = [10,10,10,10]; 
     pnlNameFiles.alignment = ["fill","center"]; 
 
-    var ddNameAs_array = ["Use layer name (strip extension)","Use layer name (keep extension)","Use layer and parent group names","Use index descending","Use index ascending"]; 
+    var ddNameAs_array = ["使用图层名(去除扩展名)","使用图层名(保留扩展名)","使用图层名及上级组名","按索引降序","按索引升序"];
     var ddNameAs = pnlNameFiles.add("dropdownlist", undefined, undefined, {name: "ddNameAs", items: ddNameAs_array}); 
     ddNameAs.selection = 0; 
 
@@ -2692,11 +2762,11 @@ function makeMainDialog() {
     grpDelimiter.margins = 0; 
 
     var cbDelimiter = grpDelimiter.add("checkbox", undefined, undefined, {name: "cbDelimiter"}); 
-    cbDelimiter.helpTip = "Whether to use a custom delimiter between words"; 
-    cbDelimiter.text = "Use Custom Delimiter"; 
+    cbDelimiter.helpTip = "是否在单词之间使用自定义分隔符";
+    cbDelimiter.text = "使用自定义分隔符";
 
     var txtDelimiter = grpDelimiter.add('edittext {properties: {name: "txtDelimiter"}}'); 
-    txtDelimiter.helpTip = "The delimiter to use between words"; 
+    txtDelimiter.helpTip = "单词之间使用的分隔符";
     txtDelimiter.text = "_"; 
     txtDelimiter.preferredSize.width = 22; 
 
@@ -2709,9 +2779,9 @@ function makeMainDialog() {
     grpCasing.margins = 0; 
 
     var lblLetterCasing = grpCasing.add("statictext", undefined, undefined, {name: "lblLetterCasing"}); 
-    lblLetterCasing.text = "Letter Casing"; 
+    lblLetterCasing.text = "字母大小写";
 
-    var ddLetterCasing_array = ["Keep","Lowercase","Uppercase"]; 
+    var ddLetterCasing_array = ["保持原样","小写","大写"];
     var ddLetterCasing = grpCasing.add("dropdownlist", undefined, undefined, {name: "ddLetterCasing", items: ddLetterCasing_array}); 
     ddLetterCasing.selection = 0; 
 
@@ -2732,11 +2802,11 @@ function makeMainDialog() {
     grpPrefixSuffixLabel.margins = [0,0,0,0]; 
 
     var lblPrefix = grpPrefixSuffixLabel.add("statictext", undefined, undefined, {name: "lblPrefix"}); 
-    lblPrefix.text = "Prefix"; 
+    lblPrefix.text = "前缀";
     lblPrefix.alignment = ["left","center"]; 
 
     var lblSuffix = grpPrefixSuffixLabel.add("statictext", undefined, undefined, {name: "lblSuffix"}); 
-    lblSuffix.text = "Suffix"; 
+    lblSuffix.text = "后缀";
 
     // GRPPREFIXSUFFIX
     // ===============
@@ -2747,14 +2817,14 @@ function makeMainDialog() {
     grpPrefixSuffix.margins = 0; 
 
     var txtPrefix = grpPrefixSuffix.add('edittext {properties: {name: "txtPrefix"}}'); 
-    txtPrefix.helpTip = "Prefix will be added before every layer name"; 
+    txtPrefix.helpTip = "前缀将添加在每个图层名之前";
     txtPrefix.preferredSize.width = 100; 
 
     var lblEllipsis = grpPrefixSuffix.add("statictext", undefined, undefined, {name: "lblEllipsis"}); 
     lblEllipsis.text = "..."; 
 
     var txtSuffix = grpPrefixSuffix.add('edittext {properties: {name: "txtSuffix"}}'); 
-    txtSuffix.helpTip = "Suffix will be added after every layer name"; 
+    txtSuffix.helpTip = "后缀将添加在每个图层名之后";
     txtSuffix.preferredSize.width = 100; 
 
     // GRPCOL2
@@ -2776,8 +2846,8 @@ function makeMainDialog() {
     grpActions.alignment = ["fill","center"]; 
 
     var btnRun = grpActions.add("button", undefined, undefined, {name: "btnRun"}); 
-    btnRun.helpTip = "Runs the script with the selected settings"; 
-    btnRun.text = "Run"; 
+    btnRun.helpTip = "使用所选设置运行脚本";
+    btnRun.text = "运行";
 
     // GRPCLOSEBUTTONS
     // ===============
@@ -2788,30 +2858,30 @@ function makeMainDialog() {
     grpCloseButtons.margins = 0; 
 
     var btnCancel = grpCloseButtons.add("button", undefined, undefined, {name: "btnCancel"}); 
-    btnCancel.helpTip = "Closes the dialog and does not save any changes"; 
-    btnCancel.text = "Cancel"; 
+    btnCancel.helpTip = "关闭对话框且不保存任何更改";
+    btnCancel.text = "取消";
     btnCancel.preferredSize.width = 111; 
 
     var btnSaveAndCancel = grpCloseButtons.add("button", undefined, undefined, {name: "btnSaveAndCancel"}); 
-    btnSaveAndCancel.helpTip = "Closes the dialog but saves any changes made"; 
-    btnSaveAndCancel.text = "Save and Close"; 
+    btnSaveAndCancel.helpTip = "关闭对话框并保存所做的更改";
+    btnSaveAndCancel.text = "保存并关闭";
 
     // GRPACTIONS
     // ==========
     var cbOverwriteFiles = grpActions.add("checkbox", undefined, undefined, {name: "cbOverwriteFiles"}); 
-    cbOverwriteFiles.helpTip = "If checked, will overwrite existing files if they have the same name. Otherwise it will make unique copies"; 
-    cbOverwriteFiles.text = "Overwrite Existing Files"; 
+    cbOverwriteFiles.helpTip = "勾选后,同名文件将被覆盖;否则将创建唯一副本";
+    cbOverwriteFiles.text = "覆盖已有文件";
     cbOverwriteFiles.alignment = ["center","top"]; 
 
     var cbSilent = grpActions.add("checkbox", undefined, undefined, {name: "cbSilent"}); 
-    cbSilent.helpTip = "If checked, will run without a progress bar and success confirmation."; 
-    cbSilent.text = "Run Silently"; 
+    cbSilent.helpTip = "勾选后,运行时不显示进度条和完成提示。";
+    cbSilent.text = "静默运行";
     cbSilent.alignment = ["center","top"]; 
 
     // PNLOUTPUT
     // =========
     var pnlOutput = grpCol2.add("panel", undefined, undefined, {name: "pnlOutput"}); 
-    pnlOutput.text = "Output Options"; 
+    pnlOutput.text = "输出选项";
     pnlOutput.orientation = "column"; 
     pnlOutput.alignChildren = ["left","top"]; 
     pnlOutput.spacing = 10; 
@@ -2827,16 +2897,16 @@ function makeMainDialog() {
     grpGroupsAs.margins = 0; 
 
     var cbGroupsAsFolders = grpGroupsAs.add("checkbox", undefined, undefined, {name: "cbGroupsAsFolders"}); 
-    cbGroupsAsFolders.helpTip = "Groups and sub-groups are saved as directories."; 
-    cbGroupsAsFolders.text = "Groups as Folders"; 
+    cbGroupsAsFolders.helpTip = "图层组和子组保存为文件夹。";
+    cbGroupsAsFolders.text = "图层组转为文件夹";
 
     var cbTopGroupsAsFolders = grpGroupsAs.add("checkbox", undefined, undefined, {name: "cbTopGroupsAsFolders"}); 
-    cbTopGroupsAsFolders.helpTip = "Groups are saved as directories. Layers in nested groups will be saved in their topmost group."; 
-    cbTopGroupsAsFolders.text = "Top Groups as Folders"; 
+    cbTopGroupsAsFolders.helpTip = "图层组保存为文件夹。嵌套子组中的图层会保存到其顶层组中。";
+    cbTopGroupsAsFolders.text = "顶层组转为文件夹";
 
     var cbTopGroupsAsLayers = grpGroupsAs.add("checkbox", undefined, undefined, {name: "cbTopGroupsAsLayers"}); 
-    cbTopGroupsAsLayers.helpTip = "Top level groups will merge all their children into a single layer before export"; 
-    cbTopGroupsAsLayers.text = "Merge Groups as Layers"; 
+    cbTopGroupsAsLayers.helpTip = "导出前将顶层组的所有子图层合并为一个图层";
+    cbTopGroupsAsLayers.text = "合并组为图层";
 
     // PNLOUTPUT
     // =========
@@ -2852,17 +2922,17 @@ function makeMainDialog() {
     grpForegroundBackground.margins = 0; 
 
     var cbForeground = grpForegroundBackground.add("checkbox", undefined, undefined, {name: "cbForeground"}); 
-    cbForeground.helpTip = "The top layer will be used as a foreground in every export."; 
-    cbForeground.text = "Top Layer as Foreground"; 
+    cbForeground.helpTip = "每次导出时将顶部图层作为前景使用。";
+    cbForeground.text = "顶部图层作为前景";
 
     var cbBackground = grpForegroundBackground.add("checkbox", undefined, undefined, {name: "cbBackground"}); 
-    cbBackground.helpTip = "The bottom layer will be used as a background in every export."; 
-    cbBackground.text = "Bottom Layer as Background"; 
+    cbBackground.helpTip = "每次导出时将底部图层作为背景使用。";
+    cbBackground.text = "底部图层作为背景";
 
     // PNLMODIFYLAYERS
     // ===============
     var pnlModifyLayers = grpCol2.add("panel", undefined, undefined, {name: "pnlModifyLayers"}); 
-    pnlModifyLayers.text = "Modify Layers"; 
+    pnlModifyLayers.text = "修改图层";
     pnlModifyLayers.orientation = "column"; 
     pnlModifyLayers.alignChildren = ["left","top"]; 
     pnlModifyLayers.spacing = 5; 
@@ -2878,12 +2948,28 @@ function makeMainDialog() {
     grpTrim.margins = 0; 
 
     var cbTrim = grpTrim.add("checkbox", undefined, undefined, {name: "cbTrim"}); 
-    cbTrim.helpTip = "Whether to trim before export"; 
-    cbTrim.text = "Trim"; 
+    cbTrim.helpTip = "导出前是否裁切";
+    cbTrim.text = "裁切";
 
-    var ddTrim_array = ["Each Layer","Each Layer (use trim())","Combined"]; 
+    var ddTrim_array = ["每个图层","每个图层(使用 trim())","合并裁切"];
     var ddTrim = grpTrim.add("dropdownlist", undefined, undefined, {name: "ddTrim", items: ddTrim_array}); 
     ddTrim.selection = 0; 
+
+    // GRPTRIMDIR
+    // ==========
+    var grpTrimDir = pnlModifyLayers.add("group", undefined, {name: "grpTrimDir"}); 
+    grpTrimDir.orientation = "row"; 
+    grpTrimDir.alignChildren = ["left","center"]; 
+    grpTrimDir.spacing = 10; 
+    grpTrimDir.margins = 0; 
+
+    var lblTrimDir = grpTrimDir.add("statictext", undefined, undefined, {name: "lblTrimDir"}); 
+    lblTrimDir.helpTip = "导出前裁切的方向";
+    lblTrimDir.text = "裁切方向";
+
+    var ddTrimDir_array = ["水平和垂直","水平","垂直"];
+    var ddTrimDir = grpTrimDir.add("dropdownlist", undefined, undefined, {name: "ddTrimDir", items: ddTrimDir_array}); 
+    ddTrimDir.selection = 0; 
 
     // GRPPADDING
     // ==========
@@ -2894,23 +2980,40 @@ function makeMainDialog() {
     grpPadding.margins = 0; 
 
     var cbPadding = grpPadding.add("checkbox", undefined, undefined, {name: "cbPadding"}); 
-    cbPadding.helpTip = "Whether to add padding to every layer before export"; 
-    cbPadding.text = "Padding"; 
+    cbPadding.helpTip = "导出前是否为每个图层添加边距";
+    cbPadding.text = "边距";
 
-    // GRPPADDINGLABEL
-    // ===============
-    var grpPaddingLabel = grpPadding.add("group", undefined, {name: "grpPaddingLabel"}); 
-    grpPaddingLabel.orientation = "row"; 
-    grpPaddingLabel.alignChildren = ["left","center"]; 
-    grpPaddingLabel.spacing = 0; 
-    grpPaddingLabel.margins = 0; 
+    // GRPPADDINGXLABEL
+    // ================
+    var grpPaddingXLabel = grpPadding.add("group", undefined, {name: "grpPaddingXLabel"}); 
+    grpPaddingXLabel.orientation = "row"; 
+    grpPaddingXLabel.alignChildren = ["left","center"]; 
+    grpPaddingXLabel.spacing = 0; 
+    grpPaddingXLabel.margins = 0; 
 
-    var txtPadding = grpPaddingLabel.add('edittext {properties: {name: "txtPadding"}}'); 
-    txtPadding.text = "0"; 
-    txtPadding.preferredSize.width = 29; 
+    var txtPaddingX = grpPaddingXLabel.add('edittext {properties: {name: "txtPaddingX"}}'); 
+    txtPaddingX.helpTip = "导出前为每个图层添加的水平边距";
+    txtPaddingX.text = "0"; 
+    txtPaddingX.preferredSize.width = 29; 
 
-    var lblPadding = grpPaddingLabel.add("statictext", undefined, undefined, {name: "lblPadding"}); 
-    lblPadding.text = "px"; 
+    var lblPaddingX = grpPaddingXLabel.add("statictext", undefined, undefined, {name: "lblPaddingX"}); 
+    lblPaddingX.text = "px"; 
+
+    // GRPPADDINGYLABEL
+    // ================
+    var grpPaddingYLabel = grpPadding.add("group", undefined, {name: "grpPaddingYLabel"}); 
+    grpPaddingYLabel.orientation = "row"; 
+    grpPaddingYLabel.alignChildren = ["left","center"]; 
+    grpPaddingYLabel.spacing = 0; 
+    grpPaddingYLabel.margins = 0; 
+
+    var txtPaddingY = grpPaddingYLabel.add('edittext {properties: {name: "txtPaddingY"}}'); 
+    txtPaddingY.helpTip = "导出前为每个图层添加的垂直边距";
+    txtPaddingY.text = "0"; 
+    txtPaddingY.preferredSize.width = 29; 
+
+    var lblPaddingY = grpPaddingYLabel.add("statictext", undefined, undefined, {name: "lblPaddingY"}); 
+    lblPaddingY.text = "px"; 
 
     // GRPSCALE
     // ========
@@ -2921,8 +3024,8 @@ function makeMainDialog() {
     grpScale.margins = 0; 
 
     var cbScale = grpScale.add("checkbox", undefined, undefined, {name: "cbScale"}); 
-    cbScale.helpTip = "Whether to scale every layer before export"; 
-    cbScale.text = "Scale"; 
+    cbScale.helpTip = "导出前是否缩放每个图层";
+    cbScale.text = "缩放";
 
     // GRPSCALELABEL
     // =============
@@ -2942,7 +3045,7 @@ function makeMainDialog() {
     // PNLEXPORTAS
     // ===========
     var pnlExportAs = dialog.add("panel", undefined, undefined, {name: "pnlExportAs", borderStyle: "none"}); 
-    pnlExportAs.text = "Export As"; 
+    pnlExportAs.text = "导出为";
     pnlExportAs.orientation = "column"; 
     pnlExportAs.alignChildren = ["center","center"]; 
     pnlExportAs.spacing = 10; 
@@ -2975,19 +3078,19 @@ function makeMainDialog() {
     grpPng24Matte.margins = 0; 
 
     var lblPng24Matte = grpPng24Matte.add("statictext", undefined, undefined, {name: "lblPng24Matte"}); 
-    lblPng24Matte.text = "Matte"; 
+    lblPng24Matte.text = "杂边";
 
-    var ddPng24Matte_array = ["White","Black","Gray","-","Background","Foreground"]; 
+    var ddPng24Matte_array = ["白色","黑色","灰色","-","背景色","前景色"];
     var ddPng24Matte = grpPng24Matte.add("dropdownlist", undefined, undefined, {name: "ddPng24Matte", items: ddPng24Matte_array}); 
     ddPng24Matte.selection = 0; 
 
     // TABPNG24
     // ========
     var cbPng24Transparency = tabPng24.add("checkbox", undefined, undefined, {name: "cbPng24Transparency"}); 
-    cbPng24Transparency.text = "Transparency"; 
+    cbPng24Transparency.text = "透明度";
 
-    var cbPng24Interlaced = tabPng24.add("checkbox", undefined, undefined, {name: "cbPng24Interlaced"}); 
-    cbPng24Interlaced.text = "Interlaced"; 
+    var cbPng24Interlaced = tabPng24.add("checkbox", undefined, undefined, {name: "cbPng24Interlaced"});
+    cbPng24Interlaced.text = "交错";
 
     // TABPNG8
     // =======
@@ -3007,9 +3110,9 @@ function makeMainDialog() {
     grpPng8ColorReduction.margins = 0; 
 
     var lblPng8ColorReduction = grpPng8ColorReduction.add("statictext", undefined, undefined, {name: "lblPng8ColorReduction"}); 
-    lblPng8ColorReduction.text = "Color Reduction"; 
+    lblPng8ColorReduction.text = "颜色缩减";
 
-    var ddPng8ColorReduction_array = ["Perceptual","Selective","Adaptive","Restrictive (Web)","-","Black & White","Grayscale","Mac OS","Windows"]; 
+    var ddPng8ColorReduction_array = ["可感知","可选择","随样性","限制(Web)","-","黑白","灰度","Mac OS","Windows"];
     var ddPng8ColorReduction = grpPng8ColorReduction.add("dropdownlist", undefined, undefined, {name: "ddPng8ColorReduction", items: ddPng8ColorReduction_array}); 
     ddPng8ColorReduction.selection = 0; 
 
@@ -3022,7 +3125,7 @@ function makeMainDialog() {
     grpPng8NumberOfColors.margins = 0; 
 
     var lblNumberOfColors = grpPng8NumberOfColors.add("statictext", undefined, undefined, {name: "lblNumberOfColors"}); 
-    lblNumberOfColors.text = "Number of Colors"; 
+    lblNumberOfColors.text = "颜色数量";
 
     var txtPng8NumberofColors = grpPng8NumberOfColors.add('edittext {properties: {name: "txtPng8NumberofColors"}}'); 
     txtPng8NumberofColors.preferredSize.width = 36; 
@@ -3036,9 +3139,9 @@ function makeMainDialog() {
     grpPng8Dither.margins = 0; 
 
     var lblPng8Dither = grpPng8Dither.add("statictext", undefined, undefined, {name: "lblPng8Dither"}); 
-    lblPng8Dither.text = "Dither"; 
+    lblPng8Dither.text = "仿色";
 
-    var ddPng8Dither_array = ["None","Diffusion","Pattern","Noise"]; 
+    var ddPng8Dither_array = ["无","扩散","图案","杂色"];
     var ddPng8Dither = grpPng8Dither.add("dropdownlist", undefined, undefined, {name: "ddPng8Dither", items: ddPng8Dither_array}); 
     ddPng8Dither.selection = 1; 
 
@@ -3069,9 +3172,9 @@ function makeMainDialog() {
     grpPng8Matte.margins = 0; 
 
     var lblPng8Matte = grpPng8Matte.add("statictext", undefined, undefined, {name: "lblPng8Matte"}); 
-    lblPng8Matte.text = "Matte"; 
+    lblPng8Matte.text = "杂边";
 
-    var ddPng8Matte_array = ["White","Black","Gray","-","Background","Foreground"]; 
+    var ddPng8Matte_array = ["白色","黑色","灰色","-","背景色","前景色"];
     var ddPng8Matte = grpPng8Matte.add("dropdownlist", undefined, undefined, {name: "ddPng8Matte", items: ddPng8Matte_array}); 
     ddPng8Matte.selection = 0; 
 
@@ -3084,7 +3187,7 @@ function makeMainDialog() {
     grpPng8Transparency.margins = 0; 
 
     var cbPng8Transparency = grpPng8Transparency.add("checkbox", undefined, undefined, {name: "cbPng8Transparency"}); 
-    cbPng8Transparency.text = "Transparency"; 
+    cbPng8Transparency.text = "透明度";
 
     // GRPPNG8TRANSPARENCYDITHER
     // =========================
@@ -3096,9 +3199,9 @@ function makeMainDialog() {
     grpPng8TransparencyDither.margins = 0; 
 
     var lblPng8TransparencyDither = grpPng8TransparencyDither.add("statictext", undefined, undefined, {name: "lblPng8TransparencyDither"}); 
-    lblPng8TransparencyDither.text = "Transparency Dither"; 
+    lblPng8TransparencyDither.text = "透明度仿色";
 
-    var ddPng8TransparencyDither_array = ["None","Diffusion","Pattern","Noise"]; 
+    var ddPng8TransparencyDither_array = ["无","扩散","图案","杂色"];
     var ddPng8TransparencyDither = grpPng8TransparencyDither.add("dropdownlist", undefined, undefined, {name: "ddPng8TransparencyDither", items: ddPng8TransparencyDither_array}); 
     ddPng8TransparencyDither.selection = 0; 
 
@@ -3114,7 +3217,7 @@ function makeMainDialog() {
     // TABPNG8
     // =======
     var cbPng8Interlaced = tabPng8.add("checkbox", undefined, undefined, {name: "cbPng8Interlaced"}); 
-    cbPng8Interlaced.text = "Interlaced"; 
+    cbPng8Interlaced.text = "交错";
 
     // TABJPG
     // ======
@@ -3134,7 +3237,7 @@ function makeMainDialog() {
     grpJpgQuality.margins = 0; 
 
     var lblQuality = grpJpgQuality.add("statictext", undefined, undefined, {name: "lblQuality"}); 
-    lblQuality.text = "Quality"; 
+    lblQuality.text = "品质";
 
     var sldrJpgQuality = grpJpgQuality.add("slider", undefined, undefined, undefined, undefined, {name: "sldrJpgQuality"}); 
     sldrJpgQuality.minvalue = 0; 
@@ -3154,22 +3257,22 @@ function makeMainDialog() {
     grpJpgMatte.margins = 0; 
 
     var lblJpgMatte = grpJpgMatte.add("statictext", undefined, undefined, {name: "lblJpgMatte"}); 
-    lblJpgMatte.text = "Matte"; 
+    lblJpgMatte.text = "杂边";
 
-    var ddJpgMatte_array = ["White","Black","Gray","-","Background","Foreground"]; 
+    var ddJpgMatte_array = ["白色","黑色","灰色","-","背景色","前景色"];
     var ddJpgMatte = grpJpgMatte.add("dropdownlist", undefined, undefined, {name: "ddJpgMatte", items: ddJpgMatte_array}); 
     ddJpgMatte.selection = 0; 
 
     // TABJPG
     // ======
     var cbJpgIcc = tabJpg.add("checkbox", undefined, undefined, {name: "cbJpgIcc"}); 
-    cbJpgIcc.text = "ICC Profile"; 
+    cbJpgIcc.text = "ICC 配置文件";
 
-    var cbJpgOptimized = tabJpg.add("checkbox", undefined, undefined, {name: "cbJpgOptimized"}); 
-    cbJpgOptimized.text = "Optimized"; 
+    var cbJpgOptimized = tabJpg.add("checkbox", undefined, undefined, {name: "cbJpgOptimized"});
+    cbJpgOptimized.text = "优化";
 
-    var cbJpgProgressive = tabJpg.add("checkbox", undefined, undefined, {name: "cbJpgProgressive"}); 
-    cbJpgProgressive.text = "Progressive"; 
+    var cbJpgProgressive = tabJpg.add("checkbox", undefined, undefined, {name: "cbJpgProgressive"});
+    cbJpgProgressive.text = "连续";
 
     // TABTIF
     // ======
@@ -3189,9 +3292,9 @@ function makeMainDialog() {
     grpTifEncoding.margins = 0; 
 
     var lblTifEncoding = grpTifEncoding.add("statictext", undefined, undefined, {name: "lblTifEncoding"}); 
-    lblTifEncoding.text = "Image Compression"; 
+    lblTifEncoding.text = "图像压缩";
 
-    var ddTifEncoding_array = ["None","LZW","ZIP","JPG"]; 
+    var ddTifEncoding_array = ["无","LZW","ZIP","JPG"];
     var ddTifEncoding = grpTifEncoding.add("dropdownlist", undefined, undefined, {name: "ddTifEncoding", items: ddTifEncoding_array}); 
     ddTifEncoding.selection = 0; 
 
@@ -3204,7 +3307,7 @@ function makeMainDialog() {
     grpTifQuality.margins = 0; 
 
     var lblTifQuality = grpTifQuality.add("statictext", undefined, undefined, {name: "lblTifQuality"}); 
-    lblTifQuality.text = "Quality"; 
+    lblTifQuality.text = "品质";
 
     var sldrTifQuality = grpTifQuality.add("slider", undefined, undefined, undefined, undefined, {name: "sldrTifQuality"}); 
     sldrTifQuality.minvalue = 0; 
@@ -3218,13 +3321,13 @@ function makeMainDialog() {
     // TABTIF
     // ======
     var cbTifWithAlpha = tabTif.add("checkbox", undefined, undefined, {name: "cbTifWithAlpha"}); 
-    cbTifWithAlpha.text = "With Alpha Channel"; 
+    cbTifWithAlpha.text = "包含 Alpha 通道";
 
-    var cbTifIcc = tabTif.add("checkbox", undefined, undefined, {name: "cbTifIcc"}); 
-    cbTifIcc.text = "ICC Profile"; 
+    var cbTifIcc = tabTif.add("checkbox", undefined, undefined, {name: "cbTifIcc"});
+    cbTifIcc.text = "ICC 配置文件";
 
-    var cbTifTransparency = tabTif.add("checkbox", undefined, undefined, {name: "cbTifTransparency"}); 
-    cbTifTransparency.text = "Transparency"; 
+    var cbTifTransparency = tabTif.add("checkbox", undefined, undefined, {name: "cbTifTransparency"});
+    cbTifTransparency.text = "透明度";
 
     // TABPDF
     // ======
@@ -3244,14 +3347,14 @@ function makeMainDialog() {
     grpPdfStandard.margins = 0; 
 
     var lblPdfStandard = grpPdfStandard.add("statictext", undefined, undefined, {name: "lblPdfStandard"}); 
-    lblPdfStandard.text = "Standard"; 
+    lblPdfStandard.text = "标准";
 
-    var ddPdfStandard_array = ["None","PDF/X-1a:2001","PDF/X-1a:2003","PDF/X-3:2002","PDF/X-3:2003","PDF/X-4:2010"]; 
+    var ddPdfStandard_array = ["无","PDF/X-1a:2001","PDF/X-1a:2003","PDF/X-3:2002","PDF/X-3:2003","PDF/X-4:2010"];
     var ddPdfStandard = grpPdfStandard.add("dropdownlist", undefined, undefined, {name: "ddPdfStandard", items: ddPdfStandard_array}); 
     ddPdfStandard.selection = 0; 
 
     var lblPdfCompatibility = grpPdfStandard.add("statictext", undefined, undefined, {name: "lblPdfCompatibility"}); 
-    lblPdfCompatibility.text = "Compatibility"; 
+    lblPdfCompatibility.text = "兼容性";
 
     var ddPdfCompatibility_array = ["Acrobat 4 (PDF 1.3)","Acrobat 5 (PDF 1.4)","Acrobat 6 (PDF 1.5)","Acrobat 7 (PDF 1.6)","Acrobat 8 (PDF 1.7)"]; 
     var ddPdfCompatibility = grpPdfStandard.add("dropdownlist", undefined, undefined, {name: "ddPdfCompatibility", items: ddPdfCompatibility_array}); 
@@ -3266,7 +3369,7 @@ function makeMainDialog() {
     grpPdfColorConversion.margins = 0; 
 
     var cbPdfColorConversion = grpPdfColorConversion.add("checkbox", undefined, undefined, {name: "cbPdfColorConversion"}); 
-    cbPdfColorConversion.text = "Color Conversion"; 
+    cbPdfColorConversion.text = "颜色转换";
 
     // GRPPDFDESTINATIONPROFILE
     // ========================
@@ -3277,7 +3380,7 @@ function makeMainDialog() {
     grpPdfDestinationProfile.margins = 0; 
 
     var lblPdfDestinationProfile = grpPdfDestinationProfile.add("statictext", undefined, undefined, {name: "lblPdfDestinationProfile"}); 
-    lblPdfDestinationProfile.text = "Destination"; 
+    lblPdfDestinationProfile.text = "目标";
 
     var ddPdfDestinationProfile_array = ["Japan Color 2001 Coated","Japan Color 2001 Uncoated","Japan Color 2002 Newspaper","Japan Color 2003 Web Coated","Japan Web Coated (Ad)","U.S. Sheetfed Coated v2","U.S. Sheetfed Uncoated v2","U.S. Web Coated (SWOP) v2","U.S. Web Uncoated v2","-","sRGB IEC61966-2.1","Adobe RGB (1998)","Apple RGB","ColorMatch RGBimage P3","ProPhoto RGB","Rec.601 NTSC Gamma 2.4","Rec.601 PAL Gamma 2.4","Rec.709 Gamma 2.4"]; 
     var ddPdfDestinationProfile = grpPdfDestinationProfile.add("dropdownlist", undefined, undefined, {name: "ddPdfDestinationProfile", items: ddPdfDestinationProfile_array}); 
@@ -3291,7 +3394,7 @@ function makeMainDialog() {
     grpPdfDownSample.spacing = 10; 
     grpPdfDownSample.margins = 0; 
 
-    var ddPdfDownSample_array = ["Do Not Downsample","Average Downsampling To","Subsampling To","Bicubic Downsampling To"]; 
+    var ddPdfDownSample_array = ["不缩减像素","平均缩减像素至","次像素采样至","两次立方缩减像素至"];
     var ddPdfDownSample = grpPdfDownSample.add("dropdownlist", undefined, undefined, {name: "ddPdfDownSample", items: ddPdfDownSample_array}); 
     ddPdfDownSample.selection = 3; 
 
@@ -3311,7 +3414,7 @@ function makeMainDialog() {
     lblPdfDownSampleSize.text = "PPI"; 
 
     var lblPdfDownSampleSizeLimit = grpPdfDownSampleSize.add("statictext", undefined, undefined, {name: "lblPdfDownSampleSizeLimit"}); 
-    lblPdfDownSampleSizeLimit.text = "For Images Above"; 
+    lblPdfDownSampleSizeLimit.text = "用于图像高于";
 
     var txtPdfDownSampleSizeLimit = grpPdfDownSampleSize.add('edittext {properties: {name: "txtPdfDownSampleSizeLimit"}}'); 
     txtPdfDownSampleSizeLimit.text = "450"; 
@@ -3329,9 +3432,9 @@ function makeMainDialog() {
     grpPdfEncoding.margins = 0; 
 
     var lblPdfEncoding = grpPdfEncoding.add("statictext", undefined, undefined, {name: "lblPdfEncoding"}); 
-    lblPdfEncoding.text = "Compression"; 
+    lblPdfEncoding.text = "压缩";
 
-    var ddPdfEncoding_array = ["None","ZIP","JPEG"]; 
+    var ddPdfEncoding_array = ["无","ZIP","JPEG"];
     var ddPdfEncoding = grpPdfEncoding.add("dropdownlist", undefined, undefined, {name: "ddPdfEncoding", items: ddPdfEncoding_array}); 
     ddPdfEncoding.selection = 2; 
 
@@ -3344,7 +3447,7 @@ function makeMainDialog() {
     grpPdfQuality.margins = 0; 
 
     var lblPdfQuality = grpPdfQuality.add("statictext", undefined, undefined, {name: "lblPdfQuality"}); 
-    lblPdfQuality.text = "Quality"; 
+    lblPdfQuality.text = "品质";
 
     var sldrPdfQuality = grpPdfQuality.add("slider", undefined, undefined, undefined, undefined, {name: "sldrPdfQuality"}); 
     sldrPdfQuality.minvalue = 0; 
@@ -3358,10 +3461,10 @@ function makeMainDialog() {
     // TABPDF
     // ======
     var cbPdfWithAlpha = tabPdf.add("checkbox", undefined, undefined, {name: "cbPdfWithAlpha"}); 
-    cbPdfWithAlpha.text = "With Alpha Channel"; 
+    cbPdfWithAlpha.text = "包含 Alpha 通道";
 
-    var cbPdfIcc = tabPdf.add("checkbox", undefined, undefined, {name: "cbPdfIcc"}); 
-    cbPdfIcc.text = "ICC Profile"; 
+    var cbPdfIcc = tabPdf.add("checkbox", undefined, undefined, {name: "cbPdfIcc"});
+    cbPdfIcc.text = "ICC 配置文件";
 
     // TABTGA
     // ======
@@ -3381,19 +3484,19 @@ function makeMainDialog() {
     grpTgaDepth.margins = 0; 
 
     var lblTgaDepth = grpTgaDepth.add("statictext", undefined, undefined, {name: "lblTgaDepth"}); 
-    lblTgaDepth.text = "Depth"; 
+    lblTgaDepth.text = "深度";
 
-    var ddTgaDepth_array = ["16 bit","24 bit","36 bit"]; 
+    var ddTgaDepth_array = ["16 位","24 位","36 位"];
     var ddTgaDepth = grpTgaDepth.add("dropdownlist", undefined, undefined, {name: "ddTgaDepth", items: ddTgaDepth_array}); 
     ddTgaDepth.selection = 0; 
 
     // TABTGA
     // ======
     var cbTgaWithAlpha = tabTga.add("checkbox", undefined, undefined, {name: "cbTgaWithAlpha"}); 
-    cbTgaWithAlpha.text = "With Alpha Channel"; 
+    cbTgaWithAlpha.text = "包含 Alpha 通道";
 
-    var cbTgaRleCompression = tabTga.add("checkbox", undefined, undefined, {name: "cbTgaRleCompression"}); 
-    cbTgaRleCompression.text = "RLE Compression"; 
+    var cbTgaRleCompression = tabTga.add("checkbox", undefined, undefined, {name: "cbTgaRleCompression"});
+    cbTgaRleCompression.text = "RLE 压缩";
 
     // TABBMP
     // ======
@@ -3413,22 +3516,22 @@ function makeMainDialog() {
     grpBmpDepth.margins = 0; 
 
     var lblBmpDepth = grpBmpDepth.add("statictext", undefined, undefined, {name: "lblBmpDepth"}); 
-    lblBmpDepth.text = "Depth"; 
+    lblBmpDepth.text = "深度";
 
-    var ddBmpDepth_array = ["24 bit","32 bit","RGB 565 (16 bit)","ARGB 1555 (16 bit)","ARGB 4444 (16 bit)"]; 
+    var ddBmpDepth_array = ["24 位","32 位","RGB 565(16 位)","ARGB 1555(16 位)","ARGB 4444(16 位)"];
     var ddBmpDepth = grpBmpDepth.add("dropdownlist", undefined, undefined, {name: "ddBmpDepth", items: ddBmpDepth_array}); 
     ddBmpDepth.selection = 0; 
 
     // TABBMP
     // ======
     var cbBmpWithAlpha = tabBmp.add("checkbox", undefined, undefined, {name: "cbBmpWithAlpha"}); 
-    cbBmpWithAlpha.text = "With Alpha Channel"; 
+    cbBmpWithAlpha.text = "包含 Alpha 通道";
 
-    var cbBmpRleCompression = tabBmp.add("checkbox", undefined, undefined, {name: "cbBmpRleCompression"}); 
-    cbBmpRleCompression.text = "RLE Compression"; 
+    var cbBmpRleCompression = tabBmp.add("checkbox", undefined, undefined, {name: "cbBmpRleCompression"});
+    cbBmpRleCompression.text = "RLE 压缩";
 
-    var cbBmpFlipRowOrder = tabBmp.add("checkbox", undefined, undefined, {name: "cbBmpFlipRowOrder"}); 
-    cbBmpFlipRowOrder.text = "Flip Row Order"; 
+    var cbBmpFlipRowOrder = tabBmp.add("checkbox", undefined, undefined, {name: "cbBmpFlipRowOrder"});
+    cbBmpFlipRowOrder.text = "翻转行顺序";
 
     // PSD
     // ===
@@ -3446,16 +3549,17 @@ function makeMainDialog() {
     // DIALOG
     // ======
     var lblMetadata = dialog.add("statictext", undefined, undefined, {name: "lblMetadata"}); 
-    lblMetadata.text = "This document contains {0} layer(s), {1} of them visible, {2} selected"; 
+    lblMetadata.text = "此文档包含 {0} 个图层,其中 {1} 个可见,{2} 个已选中";
     lblMetadata.justify = "center"; 
 
-    var lblContact = dialog.add("group"); 
+    var lblContact = dialog.add("group", undefined , {name: "lblContact"}); 
+    lblContact.getText = function() { var t=[]; for ( var n=0; n<lblContact.children.length; n++ ) { var text = lblContact.children[n].text || ''; if ( text === '' ) text = ' '; t.push( text ); } return t.join('\n'); }; 
     lblContact.orientation = "column"; 
     lblContact.alignChildren = ["center","center"]; 
     lblContact.spacing = 0; 
 
-    lblContact.add("statictext", undefined, "To get the most recent version, or leave feedback, go to:", {name: "lblContact"}); 
-    lblContact.add("statictext", undefined, "https://github.com/antipalindrome/Photoshop-Export-Layers-to-Files-Fast", {name: "lblContact"}); 
+    lblContact.add("statictext", undefined, "获取最新版本或反馈意见,请访问:");
+    lblContact.add("statictext", undefined, "https://github.com/antipalindrome/Photoshop-Export-Layers-to-Files-Fast"); 
 
-  return dialog;
+    return dialog;
 }

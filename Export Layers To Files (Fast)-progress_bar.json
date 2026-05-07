@@ -1,5 +1,5 @@
 palette {
-    text: "Please wait...",
+    text: "请稍候...",
     preferredSize: [350, 60],
     orientation: "column",
     alignChildren: "fill",
@@ -9,7 +9,7 @@ palette {
             preferredSize: [300, 16]
         },
         cancelBtn: Button {
-            text: "Cancel"
+            text: "取消"
         }
     },
     lblMessage: StaticText {
@@ -20,7 +20,7 @@ palette {
         orientation: "column",
         alignChildren: "fill",
         message: StaticText {
-            text: "Don't make changes to the current document while the script is running!",
+            text: "脚本运行期间请勿修改当前文档!",
             properties: {
                 multiline: true
             }
