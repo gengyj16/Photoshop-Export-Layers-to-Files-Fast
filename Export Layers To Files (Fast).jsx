@@ -1,4 +1,4 @@
-// NAME:
+﻿// NAME:
 //  Export Layers To Files
 
 // VERSION:

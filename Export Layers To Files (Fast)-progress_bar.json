@@ -1,4 +1,4 @@
-palette {
+﻿palette {
     text: "请稍候...",
     preferredSize: [350, 60],
     orientation: "column",
