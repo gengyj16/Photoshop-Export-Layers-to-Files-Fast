@@ -1,5 +1,7 @@
 # Photoshop-Export-Layers-to-Files-Fast
 
+> 🇨🇳 **This fork provides a Simplified Chinese localization of the script.** See [README.zh-CN.md](README.zh-CN.md) for the Chinese documentation. / 本 fork 对脚本进行了简体中文本地化，中文文档请见 [README.zh-CN.md](README.zh-CN.md)。
+
 This script allows you to export layers in your Photoshop document as individual files at a speed much faster than the built-in script from Adobe.
 
 This script does not try to achieve feature parity with the built-in script, but rather provide a more streamlined / performant experience. That being said, feel free to [make feature requests](https://github.com/antipalindrome/Photoshop-Export-Layers-to-Files-Fast/issues/new), and feel free to contribute to it and make it even more powerful!
